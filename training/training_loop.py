@@ -14,11 +14,11 @@ import pickle
 import psutil
 import numpy as np
 import torch
-import dnnlib
-from torch_utils import distributed as dist
-from torch_utils import training_stats
-from torch_utils import persistence
-from torch_utils import misc
+from .. import dnnlib
+from ..torch_utils import distributed as dist
+from ..torch_utils import training_stats
+from ..torch_utils import persistence
+from ..torch_utils import misc
 
 #----------------------------------------------------------------------------
 # Uncertainty-based loss function (Equations 14,15,16,21) proposed in the
@@ -31,12 +31,12 @@ class EDM2Loss:
         self.P_std = P_std
         self.sigma_data = sigma_data
 
-    def __call__(self, net, images, labels=None):
+    def __call__(self, net, images, x_cond=None, labels=None):
         rnd_normal = torch.randn([images.shape[0], 1, 1, 1], device=images.device)
         sigma = (rnd_normal * self.P_std + self.P_mean).exp()
         weight = (sigma ** 2 + self.sigma_data ** 2) / (sigma * self.sigma_data) ** 2
         noise = torch.randn_like(images) * sigma
-        denoised, logvar = net(images + noise, sigma, labels, return_logvar=True)
+        denoised, logvar = net(images + noise, sigma, x_cond, labels, return_logvar=True)
         loss = (weight / logvar.exp()) * ((denoised - images) ** 2) + logvar
         return loss
 

@@ -20,7 +20,7 @@ import copy
 import uuid
 import types
 import functools
-import dnnlib
+from .. import dnnlib
 
 #----------------------------------------------------------------------------
 

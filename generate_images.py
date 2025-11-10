@@ -16,8 +16,8 @@ import pickle
 import numpy as np
 import torch
 import PIL.Image
-import dnnlib
-from torch_utils import distributed as dist
+from . import dnnlib
+from .torch_utils import distributed as dist
 
 warnings.filterwarnings('ignore', '`resume_download` is deprecated')
 warnings.filterwarnings('ignore', 'You are using `torch.load` with `weights_only=False`')
@@ -73,14 +73,14 @@ config_presets = {
 # extended to support classifier-free guidance.
 
 def edm_sampler(
-    net, noise, labels=None, gnet=None,
+    net, noise, x_cond=None, labels=None, gnet=None,
     num_steps=32, sigma_min=0.002, sigma_max=80, rho=7, guidance=1,
     S_churn=0, S_min=0, S_max=float('inf'), S_noise=1,
     dtype=torch.float32, randn_like=torch.randn_like,
 ):
     # Guided denoiser.
     def denoise(x, t):
-        Dx = net(x, t, labels).to(dtype)
+        Dx = net(x, t, x_cond, labels).to(dtype)
         if guidance == 1:
             return Dx
         ref_Dx = gnet(x, t, labels).to(dtype)

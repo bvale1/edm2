@@ -11,8 +11,8 @@ import os
 import warnings
 import numpy as np
 import torch
-from torch_utils import persistence
-from torch_utils import misc
+from ..torch_utils import persistence
+from ..torch_utils import misc
 
 warnings.filterwarnings('ignore', 'torch.utils._pytree._register_pytree_node is deprecated.')
 warnings.filterwarnings('ignore', '`resume_download` is deprecated')
@@ -134,7 +134,7 @@ class StabilityVAEEncoder(Encoder):
 #----------------------------------------------------------------------------
 
 def load_stability_vae(vae_name='stabilityai/sd-vae-ft-mse', device=torch.device('cpu')):
-    import dnnlib
+    from .. import dnnlib
     cache_dir = dnnlib.make_cache_dir_path('diffusers')
     os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
     os.environ['HF_HUB_DISABLE_PROGRESS_BARS'] = '1'

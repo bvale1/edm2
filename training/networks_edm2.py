@@ -10,8 +10,8 @@
 
 import numpy as np
 import torch
-from torch_utils import persistence
-from torch_utils import misc
+from ..torch_utils import persistence
+from ..torch_utils import misc
 
 #----------------------------------------------------------------------------
 # Normalize given tensor to unit magnitude with respect to the given
@@ -189,7 +189,8 @@ class Block(torch.nn.Module):
 class UNet(torch.nn.Module):
     def __init__(self,
         img_resolution,                     # Image resolution.
-        img_channels,                       # Image channels.
+        img_channels_in,                    # Input image channels.
+        img_channels_out,                   # Output image channels.
         label_dim,                          # Class label dimensionality. 0 = unconditional.
         model_channels      = 192,          # Base multiplier for the number of channels.
         channel_mult        = [1,2,3,4],    # Per-resolution multipliers for the number of channels.
@@ -216,7 +217,7 @@ class UNet(torch.nn.Module):
 
         # Encoder.
         self.enc = torch.nn.ModuleDict()
-        cout = img_channels + 1
+        cout = img_channels_in + 1
         for level, channels in enumerate(cblock):
             res = img_resolution >> level
             if level == 0:
@@ -244,7 +245,7 @@ class UNet(torch.nn.Module):
                 cin = cout + skips.pop()
                 cout = channels
                 self.dec[f'{res}x{res}_block{idx}'] = Block(cin, cout, cemb, flavor='dec', attention=(res in attn_resolutions), **block_kwargs)
-        self.out_conv = MPConv(cout, img_channels, kernel=[3,3])
+        self.out_conv = MPConv(cout, img_channels_out, kernel=[3,3])
 
     def forward(self, x, noise_labels, class_labels):
         # Embedding.
@@ -275,7 +276,8 @@ class UNet(torch.nn.Module):
 class Precond(torch.nn.Module):
     def __init__(self,
         img_resolution,         # Image resolution.
-        img_channels,           # Image channels.
+        img_channels_in,        # Input image channels.
+        img_channels_out,       # Output image channels.
         label_dim,              # Class label dimensionality. 0 = unconditional.
         use_fp16        = True, # Run the model at FP16 precision?
         sigma_data      = 0.5,  # Expected standard deviation of the training data.
@@ -284,15 +286,22 @@ class Precond(torch.nn.Module):
     ):
         super().__init__()
         self.img_resolution = img_resolution
-        self.img_channels = img_channels
+        self.img_channels_in = img_channels_in
+        self.img_channels_out = img_channels_out
         self.label_dim = label_dim
         self.use_fp16 = use_fp16
         self.sigma_data = sigma_data
-        self.unet = UNet(img_resolution=img_resolution, img_channels=img_channels, label_dim=label_dim, **unet_kwargs)
+        self.unet = UNet(
+            img_resolution=img_resolution,
+            img_channels_in=img_channels_in, 
+            img_channels_out=img_channels_out, 
+            label_dim=label_dim, 
+            **unet_kwargs)
+        
         self.logvar_fourier = MPFourier(logvar_channels)
         self.logvar_linear = MPConv(logvar_channels, 1, kernel=[])
 
-    def forward(self, x, sigma, class_labels=None, force_fp32=False, return_logvar=False, **unet_kwargs):
+    def forward(self, x, sigma, x_cond=None, class_labels=None, force_fp32=False, return_logvar=False, **unet_kwargs):
         x = x.to(torch.float32)
         sigma = sigma.to(torch.float32).reshape(-1, 1, 1, 1)
         class_labels = None if self.label_dim == 0 else torch.zeros([1, self.label_dim], device=x.device) if class_labels is None else class_labels.to(torch.float32).reshape(-1, self.label_dim)
@@ -306,6 +315,9 @@ class Precond(torch.nn.Module):
 
         # Run the model.
         x_in = (c_in * x).to(dtype)
+        if type(x_cond) == torch.Tensor:
+            # If using an image as conditional information
+            x_in = torch.cat([x_in, x_cond.to(dtype)], dim=1)
         F_x = self.unet(x_in, c_noise, class_labels, **unet_kwargs)
         D_x = c_skip * x + c_out * F_x.to(torch.float32)
 

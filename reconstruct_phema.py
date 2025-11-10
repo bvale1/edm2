@@ -16,8 +16,8 @@ import tqdm
 import pickle
 import numpy as np
 import torch
-import dnnlib
-import training.phema
+from . import dnnlib
+from .training import phema
 
 warnings.filterwarnings('ignore', 'You are using `torch.load` with `weights_only=False`')
 
@@ -60,7 +60,8 @@ def list_input_pickles(
             if not m or not e.is_file():
                 continue
             prefix = m.group(1)
-            nimg = kimg_to_nimg(int(m.group(2)))
+            #nimg = kimg_to_nimg(int(m.group(2)))
+            nimg = int(m.group(2)) # removed using kimg units due to a bug
             std = float(m.group(3))
             if in_prefix is not None and prefix != in_prefix:
                 continue
@@ -90,7 +91,7 @@ def reconstruct_phema(
         out_nimg = max((pkl.nimg for pkl in in_pkls), default=0)
     elif not any(out_nimg == pkl.nimg for pkl in in_pkls):
         raise click.ClickException('Reconstruction time must match one of the input pickles')
-    in_pkls = [pkl for pkl in in_pkls if 0 < pkl.nimg <= out_nimg]
+    in_pkls = [pkl for pkl in in_pkls if 0 < pkl.nimg == out_nimg]
     if len(in_pkls) == 0:
         raise click.ClickException('No valid input pickles found')
     in_nimg = [pkl.nimg for pkl in in_pkls]
@@ -122,7 +123,7 @@ def reconstruct_phema(
             # Loop over batches.
             r = dnnlib.EasyDict(step_idx=0, num_steps=len(self))
             for out_std_batch in out_std_batches:
-                coefs = training.phema.solve_posthoc_coefficients(in_nimg, in_std, out_nimg, out_std_batch)
+                coefs = phema.solve_posthoc_coefficients(in_nimg, in_std, out_nimg, out_std_batch)
                 out = [dnnlib.EasyDict(net=None, nimg=out_nimg, std=std) for std in out_std_batch]
                 r.out = []
 

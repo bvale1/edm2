@@ -11,7 +11,7 @@ import functools
 import numpy as np
 import torch
 import warnings
-import dnnlib
+from .. import dnnlib
 
 #----------------------------------------------------------------------------
 # Re-seed torch & numpy random generators based on the given arguments.
