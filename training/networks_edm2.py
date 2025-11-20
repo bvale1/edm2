@@ -237,7 +237,7 @@ class UNet(torch.nn.Module):
         for level, channels in reversed(list(enumerate(cblock))):
             res = img_resolution >> level
             if level == len(cblock) - 1:
-                self.dec[f'{res}x{res}_in0'] = Block(cout, cout, cemb, flavor='dec', attention=True, **block_kwargs)
+                self.dec[f'{res}x{res}_in0'] = Block(cout, cout, cemb, flavor='dec', attention=False, **block_kwargs)
                 self.dec[f'{res}x{res}_in1'] = Block(cout, cout, cemb, flavor='dec', **block_kwargs)
             else:
                 self.dec[f'{res}x{res}_up'] = Block(cout, cout, cemb, flavor='dec', resample_mode='up', **block_kwargs)
