@@ -138,13 +138,13 @@ class Block(torch.nn.Module):
         self.clip_act = clip_act
         self.emb_gain = torch.nn.Parameter(torch.zeros([]))
         self.conv_res0 = MPConv(out_channels if flavor == 'enc' else in_channels, out_channels, kernel=[3,3])
-        self.emb_linear = MPConv(emb_channels, out_channels, kernel=[])
+        self.emb_linear = MPConv(emb_channels, out_channels, kernel=[]) if emb_channels is not None else None
         self.conv_res1 = MPConv(out_channels, out_channels, kernel=[3,3])
         self.conv_skip = MPConv(in_channels, out_channels, kernel=[1,1]) if in_channels != out_channels else None
         self.attn_qkv = MPConv(out_channels, out_channels * 3, kernel=[1,1]) if self.num_heads != 0 else None
         self.attn_proj = MPConv(out_channels, out_channels, kernel=[1,1]) if self.num_heads != 0 else None
 
-    def forward(self, x, emb):
+    def forward(self, x, emb=None):
         # Main branch.
         x = resample(x, f=self.resample_filter, mode=self.resample_mode)
         if self.flavor == 'enc':
@@ -154,8 +154,11 @@ class Block(torch.nn.Module):
 
         # Residual branch.
         y = self.conv_res0(mp_silu(x))
-        c = self.emb_linear(emb, gain=self.emb_gain) + 1
-        y = mp_silu(y * c.unsqueeze(2).unsqueeze(3).to(y.dtype))
+        if self.emb_linear is not None:
+            c = self.emb_linear(emb, gain=self.emb_gain) + 1
+            y = y * c.unsqueeze(2).unsqueeze(3).to(y.dtype)
+        y = mp_silu(y)
+        
         if self.training and self.dropout != 0:
             y = torch.nn.functional.dropout(y, p=self.dropout)
         y = self.conv_res1(y)
@@ -200,19 +203,26 @@ class UNet(torch.nn.Module):
         attn_resolutions    = [16,8],       # List of resolutions with self-attention.
         label_balance       = 0.5,          # Balance between noise embedding (0) and class embedding (1).
         concat_balance      = 0.5,          # Balance between skip connections (0) and main path (1).
+        noise_emb           = True,         # Use noise level embedding?
         **block_kwargs,                     # Arguments for Block.
     ):
         super().__init__()
         cblock = [model_channels * x for x in channel_mult]
-        cnoise = model_channels * channel_mult_noise if channel_mult_noise is not None else cblock[0]
-        cemb = model_channels * channel_mult_emb if channel_mult_emb is not None else max(cblock)
+        # if noise or class labels are used, set embedding dimensions
+        if label_dim != 0 or noise_emb:
+            cnoise = model_channels * channel_mult_noise if channel_mult_noise is not None else cblock[0]
+            cemb = model_channels * channel_mult_emb if channel_mult_emb is not None else max(cblock)
+        else:
+            cnoise = None
+            cemb = None
         self.label_balance = label_balance
         self.concat_balance = concat_balance
+        self.noise_emb = noise_emb
         self.out_gain = torch.nn.Parameter(torch.zeros([]))
 
         # Embedding.
-        self.emb_fourier = MPFourier(cnoise)
-        self.emb_noise = MPConv(cnoise, cemb, kernel=[])
+        self.emb_fourier = MPFourier(cnoise) if noise_emb else None
+        self.emb_noise = MPConv(cnoise, cemb, kernel=[]) if noise_emb else None
         self.emb_label = MPConv(label_dim, cemb, kernel=[]) if label_dim != 0 else None
 
         # Encoder.
@@ -247,12 +257,18 @@ class UNet(torch.nn.Module):
                 self.dec[f'{res}x{res}_block{idx}'] = Block(cin, cout, cemb, flavor='dec', attention=(res in attn_resolutions), **block_kwargs)
         self.out_conv = MPConv(cout, img_channels_out, kernel=[3,3])
 
-    def forward(self, x, noise_labels, class_labels):
+    def forward(self, x, noise_labels=None, class_labels=None):
         # Embedding.
-        emb = self.emb_noise(self.emb_fourier(noise_labels))
-        if self.emb_label is not None:
-            emb = mp_sum(emb, self.emb_label(class_labels * np.sqrt(class_labels.shape[1])), t=self.label_balance)
-        emb = mp_silu(emb)
+        if self.emb_noise is not None:
+            emb = self.emb_noise(self.emb_fourier(noise_labels))
+            if self.emb_label is not None:
+                emb = mp_sum(emb, self.emb_label(class_labels * np.sqrt(class_labels.shape[1])), t=self.label_balance)
+            emb = mp_silu(emb)
+        elif self.emb_label is not None:
+            emb = self.emb_label(class_labels * np.sqrt(class_labels.shape[1]))
+            emb = mp_silu(emb)
+        else:
+            emb = None
 
         # Encoder.
         x = torch.cat([x, torch.ones_like(x[:, :1])], dim=1)
